@@ -1,6 +1,6 @@
 use probo_rs::run;
 
 #[tokio::main]
-async fn main() {
-    run().await;
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    run().await
 }
