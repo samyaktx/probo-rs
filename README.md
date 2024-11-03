@@ -2,9 +2,6 @@
 
 Create a basic options trading app in Axum. The app will simulate a trading system for options by managing balances and an orderbook using in-memory variables. This assignment will help you understand state management, working with in-memory data structures, and handling basic API requests.
 
-Example website - https://probo.in/
-
-
 ### Requirements:
 
 1. **Global In-memory Variables:**
