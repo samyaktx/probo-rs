@@ -1,6 +1,6 @@
 # Overview
 
-The goal of this assignment is to create a basic options trading app in Node.js. The app will simulate a trading system for options by managing balances and an orderbook using in-memory variables. This assignment will help you understand state management, working with in-memory data structures, and handling basic API requests.
+Create a basic options trading app in Axum. The app will simulate a trading system for options by managing balances and an orderbook using in-memory variables. This assignment will help you understand state management, working with in-memory data structures, and handling basic API requests.
 
 Example website - https://probo.in/
 
@@ -77,7 +77,7 @@ const STOCK_BALANCES = {
 
 # Endpoints
 
-- [ ] **Create a user**
+- [x] **Create a user**
     - Endpoint : `/user/create/:userId`
     - Method : `GET`
     - Description: Create a new user entry in INR_BALANCES with unique user Id and default 0 balances
