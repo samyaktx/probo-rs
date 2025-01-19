@@ -5,6 +5,11 @@ pub enum EntryType {
     Reverted,
 }
 
+pub enum OrderType {
+    Yes,
+    No,
+}
+
 pub struct IndividualEntry {
     pub entry_type: EntryType,
     pub quantity: u64,         
