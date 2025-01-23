@@ -275,3 +275,256 @@ pub fn buy_yes_option(
 
     Ok(())
 }
+
+pub fn buy_no_option(
+    user_id: &String,
+    stock_symbol: &String,
+    price: u64,
+    quantity: u64,
+) -> Result<(), String> {
+    let dollar_balance = dollar_balances();
+    let mut dollar_balance_guard = dollar_balance.lock().expect("Failed to acquire lock");
+    let dollar_balance = &dollar_balance_guard.dollar_balance;
+
+    if !validate_order(user_id, quantity, price, dollar_balance) {
+        return Err("Invalid order".to_owned());
+    }
+
+    let dollar_balance = dollar_balance_guard
+        .dollar_balance
+        .get_mut(user_id)
+        .unwrap();
+    dollar_balance.balance -= quantity * price * 100;
+    dollar_balance.locked += quantity * price * 100;
+
+    let orderbook = OrderbookInstance::orderbook_instance();
+    let mut orderbook_lock = orderbook.orderbook_instance.lock().expect("Failed to acquire lock");
+    let orderbook_lock_exists = orderbook_lock.orderbook.contains_key(stock_symbol);
+
+    if !orderbook_lock_exists {
+        return Err("Invalid Stock Symbol".to_owned());
+    }
+
+    let orderbook_cell = orderbook_lock.orderbook.get_mut(stock_symbol).unwrap();
+    let mut orderbook_lock = orderbook_cell.borrow_mut();
+    let orderbook_lock_no = orderbook_lock.no.get(&price).unwrap();
+    let mut orderbook_ref = orderbook_cell.borrow_mut();
+    let orderbook_lock_yes = orderbook_ref.yes.get_mut(&(10 - price)).unwrap();
+
+    let available_quantity = orderbook_lock_no.total;
+    let available_yes_quantity = orderbook_lock_yes.total;
+
+    println!("available quantity is: {}", available_quantity);
+    println!("available yes quantity is: {}", available_yes_quantity);
+
+    let mut temp_quantity = quantity;
+
+    if available_quantity > 0 {
+        let orderbook_instance = OrderbookInstance::orderbook_instance();
+        let orderbook_guard = orderbook_instance.orderbook_instance.lock().expect("Failed to acquire lock");
+        let no_orders = &orderbook_guard.orderbook
+            .get(stock_symbol).unwrap().borrow();
+
+        let no_orders = &no_orders
+            .no
+            .get(&price).unwrap()
+            .orders;
+
+        for (user, user_entry) in no_orders {
+            let stock_balances_arc = stock_balances();
+            let mut stock_balances_guard = stock_balances_arc.lock().expect("Failed to acquire lock");
+            let stock_balance_user = stock_balances_guard
+                .stock_balance
+                .entry(user.to_owned())
+                .or_default()
+                .entry(stock_symbol.to_owned())
+                .or_default();
+
+            let stock_balances_arc = stock_balances();
+            let mut stock_balances_guard = stock_balances_arc.lock().expect("Failed to acquire lock");
+            let stock_balance_user_id = stock_balances_guard
+                .stock_balance
+                .entry(user_id.to_owned())
+                .or_default()
+                .entry(stock_symbol.to_owned())
+                .or_default();
+
+            if temp_quantity <= 0 {
+                break;
+            }
+
+            let available = user_entry.borrow().quantity;
+            let to_take = available.min(temp_quantity);
+
+            user_entry.borrow_mut().quantity -= to_take;
+
+            let mut orderbook_lock = orderbook_cell.borrow_mut();
+            let orderbook_lock_no = orderbook_lock.no.get_mut(&price).unwrap();
+            orderbook_lock_no.total -= to_take;
+
+            temp_quantity -= to_take;
+
+            match user_entry.borrow().entry_type {
+                EntryType::Sell => {
+                    stock_balance_user.no.as_mut().unwrap().locked -= to_take;
+
+                    let dollar_balance_instance = dollar_balances();
+                    let mut dollar_balance_guard = dollar_balance_instance.lock().expect("Failed to acquire lock");
+                    let dollar_balance = dollar_balance_guard.dollar_balance.get_mut(user).unwrap();
+                    dollar_balance.balance += to_take * price * 100;
+                },
+                EntryType::Reverted => {
+                    if stock_balance_user_id.yes.is_some() {
+                        println!("Stock Balance of yes before: {}", stock_balance_user_id.yes.as_ref().unwrap().quantity);
+                    }
+                    if stock_balance_user.yes.is_some() {
+                        stock_balance_user.yes.as_mut().unwrap().quantity += to_take;
+                        
+                        let dollar_balance_instance = dollar_balances();
+                        let mut dollar_balance_guard = dollar_balance_instance.lock().expect("Failed to acquire lock");
+                        let dollar_balance = dollar_balance_guard.dollar_balance.get_mut(user).unwrap();
+                        dollar_balance.locked -= to_take * price * 100;
+
+                        println!("Stock Balance of yes : {}", stock_balance_user.yes.as_ref().unwrap().quantity);
+                    }
+                    if stock_balance_user_id.yes.is_some() {
+                        println!("Stock Balance of yes after: {}", stock_balance_user_id.yes.as_ref().unwrap().quantity);
+                    }
+
+                    println!("user: {}, user_id: {}", user, user_id);
+
+                    println!("Stock Balance: {:?}", stock_balance_user);
+                    println!("Stock Balance: {:?}", stock_balance_user_id);
+
+                    println!("Stock Balance of user_id is equal to user: {}", stock_balance_user_id == stock_balance_user);
+                }
+            }
+
+            if user_entry.borrow().quantity == 0 {
+                orderbook_lock_no.orders.remove(user);
+            }
+        }
+
+        if orderbook_lock_no.total == 0 {
+            orderbook_lock.remove_no(price);
+        }
+    }
+
+    let orderbook_instance = OrderbookInstance::orderbook_instance();
+    let orderbook_guard = orderbook_instance.orderbook_instance.lock().expect("Failed to acquire lock");
+    let orderbook_cell = orderbook_guard.orderbook.get(stock_symbol).unwrap();
+    let mut orderbook_lock = orderbook_cell.borrow_mut();
+    let orderbook_yes_exists = orderbook_lock.yes.contains_key(&(10 - price));
+
+    if available_yes_quantity > 0 && orderbook_yes_exists {
+        // let orderbook_instance = OrderbookInstance::orderbook_instance();
+        // let orderbook_guard = orderbook_instance.orderbook_instance.lock().expect("Failed to acquire lock");
+        let yes_orders = &orderbook_guard.orderbook
+            .get(stock_symbol).unwrap().borrow();
+
+        let yes_orders = &yes_orders
+            .yes
+            .get(&(10 - price)).unwrap()
+            .orders;
+
+        for (user, user_entry) in yes_orders {
+            let stock_balances_arc = stock_balances();
+            let mut stock_balances_guard = stock_balances_arc.lock().expect("Failed to acquire lock");
+            let stock_balance_user = stock_balances_guard
+                .stock_balance
+                .entry(user.to_owned())
+                .or_default()
+                .entry(stock_symbol.to_owned())
+                .or_default();
+
+            let stock_balances_arc = stock_balances();
+            let mut stock_balances_guard = stock_balances_arc.lock().expect("Failed to acquire lock");
+            let stock_balance_user_id = stock_balances_guard
+                .stock_balance
+                .entry(user_id.to_owned())
+                .or_default()
+                .entry(stock_symbol.to_owned())
+                .or_default();
+
+            if temp_quantity <= 0 {
+                break;
+            }
+
+            let available = user_entry.borrow().quantity;
+            let to_take = available.min(temp_quantity);
+
+            user_entry.borrow_mut().quantity -= to_take;
+
+            let mut orderbook_lock = orderbook_cell.borrow_mut();
+            let orderbook_lock_no = orderbook_lock.no.get_mut(&price).unwrap();
+            orderbook_lock_no.total -= to_take;
+
+            temp_quantity -= to_take;
+
+            match user_entry.borrow().entry_type {
+                EntryType::Sell => {
+                    stock_balance_user.yes.as_mut().unwrap().locked -= to_take;
+
+                    let dollar_balance_instance = dollar_balances();
+                    let mut dollar_balance_guard = dollar_balance_instance.lock().expect("Failed to acquire lock");
+                    let dollar_balance = dollar_balance_guard.dollar_balance.get_mut(user).unwrap();
+                    dollar_balance.balance += to_take * (10 - price) * 100;
+                },
+                EntryType::Reverted => {
+                    if stock_balance_user_id.no.is_some() {
+                        println!("Stock Balance of yes before: {}", stock_balance_user_id.yes.as_ref().unwrap().quantity);
+                    }
+                    if stock_balance_user.no.is_some() {
+                        stock_balance_user.no.as_mut().unwrap().quantity += to_take;
+                        
+                        let dollar_balance_instance = dollar_balances();
+                        let mut dollar_balance_guard = dollar_balance_instance.lock().expect("Failed to acquire lock");
+                        let dollar_balance = dollar_balance_guard.dollar_balance.get_mut(user).unwrap();
+                        dollar_balance.locked -= to_take * (10 - price) * 100;
+
+                        println!("Stock Balance of yes : {}", stock_balance_user.yes.as_ref().unwrap().quantity);
+                    }
+
+                    if stock_balance_user_id.yes.is_some() {
+                        println!("Stock Balance of yes after: {}", stock_balance_user_id.yes.as_ref().unwrap().quantity);
+                    }
+
+                    println!("user: {}, user_id: {}", user, user_id);
+
+                    println!("Stock Balance: {:?}", stock_balance_user);
+                    println!("Stock Balance: {:?}", stock_balance_user_id);
+
+                    println!("Stock Balance of user_id is equal to user: {}", stock_balance_user_id == stock_balance_user);
+                }
+            }
+            
+            if user_entry.borrow().quantity == 0 {
+                orderbook_lock_yes.orders.remove(user);
+            }
+        }
+
+        if orderbook_lock_yes.total == 0 {
+            orderbook_lock.remove_yes((10 - price).to_owned());
+        }
+    }
+
+    if temp_quantity > 0 {
+        mint_opposite_stock(stock_symbol.to_owned(), price, temp_quantity, user_id.to_owned(), OrderType::No);
+    }
+
+    initialize_stock_balance(user_id.to_owned(), stock_symbol.to_owned());
+
+    let stock_balances = stock_balances();
+    let stock_balance_exists = stock_balances.lock().expect("Failed to acquire lock").stock_balance.contains_key(user_id);
+    if stock_balance_exists {
+        let mut stock_balances = stock_balances.lock().expect("Failed to acquire lock");
+        let stock_balances = stock_balances.stock_balance.get_mut(user_id).unwrap();
+        stock_balances.get_mut(stock_symbol).unwrap().no.as_mut().unwrap().quantity += quantity - temp_quantity;
+    }
+
+    println!("Stock quantity is: {}, the remaining temp quantity is: {}", quantity, temp_quantity);
+
+    dollar_balance.locked -= (quantity - temp_quantity) * price * 100;
+
+    Ok(())
+}
