@@ -528,3 +528,5 @@ pub fn buy_no_option(
 
     Ok(())
 }
+
+/// implement sell_yes_option and sell_no_option
